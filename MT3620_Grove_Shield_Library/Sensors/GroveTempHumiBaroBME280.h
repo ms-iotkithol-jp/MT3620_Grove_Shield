@@ -7,3 +7,7 @@
 void* GroveTempHumiBaroBME280_Open(int i2cFd);
 void GroveTempHumiBaroBME280_Read(void* inst);
 float GroveTempHumiBaroBME280_GetTemperature(void* inst);
+float GroveTempHumiBaroBME280_GetHumidity(void* inst);
+float GroveTempHumiBaroBME280_GetPressure(void* inst);
+float GroveTempHumiBaroBME280_CalcArtitude(float pressure);
+

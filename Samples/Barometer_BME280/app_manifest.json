@@ -1,0 +1,13 @@
+{
+  "SchemaVersion": 1,
+  "Name": "Barometer_BME280",
+  "ComponentId": "34137953-3C19-428D-AB10-D91FFC7C6FE9",
+  "EntryPoint": "/bin/app",
+  "CmdArgs": [],
+  "Capabilities": {
+    "Gpio": [ 8, 9, 10, 15, 16, 17, 18, 19, 20, 12, 13, 0, 1, 4, 5, 57, 58, 11, 14, 48 ],
+    "Uart": [ "ISU0", "ISU3" ],
+    "AllowedApplicationConnections": []
+  },
+  "ApplicationType": "Default"
+}
