@@ -164,6 +164,7 @@ void GroveTempHumiBaroBME280_Read(void* inst)
 	int32_t adc_H, v_x1_u32r;
 	uint16_t adc_H16;
 	if (!GroveI2C_ReadReg16(this->I2cFd, BME280_ADDRESS, BME280_REG_HUMIDITYDATA, &adc_H16)) return;
+	adc_H16 = (uint16_t)(adc_H16 << 8) | (uint16_t)(adc_H16 >> 8);
 	adc_H = adc_H16;
 	v_x1_u32r = (t_fine - ((int32_t)76800));
 	v_x1_u32r = (((((adc_H << 14) - (((int32_t)this->dig_H4) << 20) - (((int32_t)this->dig_H5) * v_x1_u32r)) + ((
@@ -199,10 +200,10 @@ float GroveTempHumiBaroBME280_GetPressure(void* inst)
 
 float GroveTempHumiBaroBME280_CalcArtitude(float pressure)
 {
-	float A = pressure / 101325;
-	float B = 1 / 5.25588;
-	float C = pow(A, B);
-	C = 1.0 - C;
-	C = C / 0.0000225577;
+	float A = pressure / 101325.0f;
+	float B = 1.0f / 5.25588f;
+	float C = (float)pow(A, B);
+	C = 1.0f - C;
+	C = C / 0.0000225577f;
 	return C;
 }

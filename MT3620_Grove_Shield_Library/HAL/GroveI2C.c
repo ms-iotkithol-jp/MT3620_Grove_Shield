@@ -8,13 +8,33 @@
 ////////////////////////////////////////////////////////////////////////////////
 // SC18IM700
 
+static int max_try_count_check_of_wait_for_i2cState = 10;
+static bool status_of_wait_for_i2cState = true;
+
+void GroveI2C_SetMaxTryCountForCheckStatus(int count)
+{
+	max_try_count_check_of_wait_for_i2cState = count;
+}
+
+bool GroveI2C_CheckMaxTryCountForChecktatus()
+{
+	return status_of_wait_for_i2cState;
+}
+
 static void wait_for_i2cState_ok(int fd)
 {
 	uint8_t i2cState;
 	SC18IM700_ReadReg(fd, 0x0A, &i2cState);
-	while (i2cState != I2C_OK)
+	status_of_wait_for_i2cState = true;
+	int trial = 0;
+	while (i2cState != I2C_OK && trial < max_try_count_check_of_wait_for_i2cState)
 	{
 		SC18IM700_ReadReg(fd, 0x0A, &i2cState);
+		trial++;
+	}
+	if (trial >= max_try_count_check_of_wait_for_i2cState)
+	{
+		status_of_wait_for_i2cState = false;
 	}
 }
 

@@ -54,6 +54,9 @@ int main(int argc, char *argv[])
 		Log_Debug("Temperature: %.1fC\n", temp);
 		Log_Debug("Humidity: %.1f\%c\n", humi, 0x25);
 
+        float discom = 0.81 * temp + 0.01 * humi * (0.99 * temp - 14.3) + 46.3;
+        Log_Debug("Discomfort Index: %.1f\n", discom);
+
 		usleep(1000000);
     }
 
