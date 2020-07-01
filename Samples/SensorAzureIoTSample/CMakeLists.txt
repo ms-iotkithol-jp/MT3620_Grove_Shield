@@ -10,7 +10,7 @@ azsphere_configure_api(TARGET_API_SET "5")
 
 add_subdirectory("../../MT3620_Grove_Shield_Library" out)
 # Create executable
-add_executable (${PROJECT_NAME} main.c)
+add_executable (${PROJECT_NAME} main.c parson.c)
 target_include_directories(${PROJECT_NAME} PUBLIC ${AZURE_SPHERE_API_SET_DIR}/usr/include/azureiot)
 target_compile_definitions(${PROJECT_NAME} PUBLIC AZURE_IOT_HUB_CONFIGURED)
 target_link_libraries (${PROJECT_NAME} m azureiot applibs pthread gcc_s c MT3620_Grove_Shield_Library)

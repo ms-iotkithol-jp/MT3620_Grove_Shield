@@ -5,6 +5,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <errno.h>
 
 #include <applibs/log.h>
 #include <applibs/gpio.h>
@@ -15,6 +16,9 @@
 #include "../../MT3620_Grove_Shield_Library/Sensors/GroveTempHumiBaroBME280.h"
 #include "../../MT3620_Grove_Shield_Library/Sensors/GroveTempHumiSHT31.h"
 
+// MT3620 RDB: LED 1 (red channel)
+#define SAMPLE_LED (8)  // MT3620_RDB_LED1_RED https://github.com/Azure/azure-sphere-samples/blob/master/Hardware/mt3620_rdb/inc/hw/sample_hardware.h
+
 // Azure IoT SDK
 
 #include <iothub_client_core_common.h>
@@ -23,6 +27,8 @@
 #include <iothubtransportmqtt.h>
 #include <iothub.h>
 #include <azure_sphere_provisioning.h>
+
+#include "parson.h" // used to parse Device Twin messages.
 
 // This C application for the MT3620 Reference Development Board (Azure Sphere)
 // outputs a string every second to Visual Studio's Device Output window
@@ -49,6 +55,13 @@ static IOTHUB_DEVICE_CLIENT_LL_HANDLE iothubClientHandle = NULL;
 static const int keepalivePeriodSeconds = 20;
 static bool iothubAuthenticated = false;
 
+// State variables
+
+static GPIO_Value_Type sendMessageButtonState = GPIO_Value_High;
+static bool statusLedOn = false;
+// LED
+static int deviceTwinStatusLedGpioFd = -1;
+
 // Azure IoT poll periods
 /*
 static const int AzureIoTDefaultPollPeriodSeconds = 1;        // poll azure iot every second
@@ -61,6 +74,15 @@ static int azureIoTPollPeriodSeconds = -1;
 // Function declarations
 static void SendEventCallback(IOTHUB_CLIENT_CONFIRMATION_RESULT result, void* context);
 static void SetupAzureClient(void);
+static void DeviceTwinCallback(DEVICE_TWIN_UPDATE_STATE updateState, const unsigned char* payload,
+    size_t payloadSize, void* userContextCallback);
+static int DeviceMethodCallback(const char* methodName, const unsigned char* payload,
+    size_t payloadSize, unsigned char** response, size_t* responseSize,
+    void* userContextCallback);
+static void TwinReportState(const char* jsonState);
+static void ReportedStateCallback(int result, void* context);
+
+
 
 static char timestamp[32];
 static char messageBuf[256];
@@ -113,9 +135,16 @@ int main(int argc, char *argv[])
     sigaction(SIGTERM, &action, NULL);
 
     ReadSensorValueDelegate readSensorValueDelegate = setupSensor();
-//	int i2cFd;
-//	GroveShield_Initialize(&i2cFd, 115200);
-//	void* bme280 = GroveTempHumiBaroBME280_Open(i2cFd);
+
+    // SAMPLE_LED is used to show Device Twin settings state
+    Log_Debug("Opening SAMPLE_LED as output.\n");
+    deviceTwinStatusLedGpioFd =
+        GPIO_OpenAsOutput(SAMPLE_LED, GPIO_OutputMode_PushPull, GPIO_Value_High);
+    if (deviceTwinStatusLedGpioFd == -1) {
+        Log_Debug("ERROR: Could not open SAMPLE_LED: %s (%d).\n", strerror(errno), errno);
+    }
+
+
 
     // Main loop
     while (!terminationRequested) {
@@ -203,6 +232,8 @@ static void SetupAzureClient(void)
             OPTION_KEEP_ALIVE);
         return;
     }
+    IoTHubDeviceClient_LL_SetDeviceTwinCallback(iothubClientHandle, DeviceTwinCallback, NULL);
+    IoTHubDeviceClient_LL_SetDeviceMethodCallback(iothubClientHandle, DeviceMethodCallback, NULL);
 }
 
 /// <summary>
@@ -287,6 +318,9 @@ static void* threadCheckGroveShield(void* arg) {
 }
 
 
+/// <summary>
+/// Check sensor connection and initialize that.
+/// </summary>
 static ReadSensorValueDelegate setupSensor()
 {
     ReadSensorValueDelegate delegateMethod = NULL;
@@ -359,4 +393,120 @@ static char* serializeMessage(SensorValuePacket* packet)
     }
     strcat(messageBuf, "}");
     return messageBuf;
+}
+
+/// <summary>
+///     Callback invoked when a Direct Method is received from Azure IoT Hub.
+/// </summary>
+static int DeviceMethodCallback(const char* methodName, const unsigned char* payload,
+    size_t payloadSize, unsigned char** response, size_t* responseSize,
+    void* userContextCallback)
+{
+    int result;
+    char* responseString;
+
+    Log_Debug("Received Device Method callback: Method name %s.\n", methodName);
+
+    if (strcmp("TriggerAlarm", methodName) == 0) {
+        // Output alarm using Log_Debug
+        Log_Debug("  ----- ALARM TRIGGERED! -----\n");
+        responseString = "\"Alarm Triggered\""; // must be a JSON string (in quotes)
+        result = 200;
+    }
+    else {
+        // All other method names are ignored
+        responseString = "{}";
+        result = -1;
+    }
+
+    // if 'response' is non-NULL, the Azure IoT library frees it after use, so copy it to heap
+    *responseSize = strlen(responseString);
+    *response = malloc(*responseSize);
+    memcpy(*response, responseString, *responseSize);
+    return result;
+}
+
+
+/// <summary>
+///     Callback invoked when a Device Twin update is received from Azure IoT Hub.
+/// </summary>
+static void DeviceTwinCallback(DEVICE_TWIN_UPDATE_STATE updateState, const unsigned char* payload,
+    size_t payloadSize, void* userContextCallback)
+{
+    size_t nullTerminatedJsonSize = payloadSize + 1;
+    char* nullTerminatedJsonString = (char*)malloc(nullTerminatedJsonSize);
+    if (nullTerminatedJsonString == NULL) {
+        Log_Debug("ERROR: Could not allocate buffer for twin update payload.\n");
+        abort();
+    }
+
+    // Copy the provided buffer to a null terminated buffer.
+    memcpy(nullTerminatedJsonString, payload, payloadSize);
+    // Add the null terminator at the end.
+    nullTerminatedJsonString[nullTerminatedJsonSize - 1] = 0;
+
+    JSON_Value* rootProperties = NULL;
+    rootProperties = json_parse_string(nullTerminatedJsonString);
+    if (rootProperties == NULL) {
+        Log_Debug("WARNING: Cannot parse the string as JSON content.\n");
+        goto cleanup;
+    }
+
+    JSON_Object* rootObject = json_value_get_object(rootProperties);
+    JSON_Object* desiredProperties = json_object_dotget_object(rootObject, "desired");
+    if (desiredProperties == NULL) {
+        desiredProperties = rootObject;
+    }
+
+    // The desired properties should have a "StatusLED" object
+    JSON_Object* LEDState = json_object_dotget_object(desiredProperties, "StatusLED");
+    if (LEDState != NULL) {
+        // ... with a "value" field which is a Boolean
+        int statusLedValue = json_object_get_boolean(LEDState, "value");
+        if (statusLedValue != -1) {
+            statusLedOn = statusLedValue == 1;
+            GPIO_SetValue(deviceTwinStatusLedGpioFd,
+                statusLedOn ? GPIO_Value_Low : GPIO_Value_High);
+        }
+    }
+
+    // Report current status LED state
+    if (statusLedOn) {
+        TwinReportState("{\"StatusLED\":{\"value\":true}}");
+    }
+    else {
+        TwinReportState("{\"StatusLED\":{\"value\":false}}");
+    }
+
+cleanup:
+    // Release the allocated memory.
+    json_value_free(rootProperties);
+    free(nullTerminatedJsonString);
+}
+
+static void TwinReportState(const char* jsonState)
+{
+    if (iothubClientHandle == NULL) {
+        Log_Debug("ERROR: Azure IoT Hub client not initialized.\n");
+    }
+    else {
+        if (IoTHubDeviceClient_LL_SendReportedState(
+            iothubClientHandle, (const unsigned char*)jsonState, strlen(jsonState),
+            ReportedStateCallback, NULL) != IOTHUB_CLIENT_OK) {
+            Log_Debug("ERROR: Azure IoT Hub client error when reporting state '%s'.\n", jsonState);
+        }
+        else {
+            Log_Debug("INFO: Azure IoT Hub client accepted request to report state '%s'.\n",
+                jsonState);
+        }
+    }
+}
+
+/// <summary>
+///     Callback invoked when the Device Twin report state request is processed by Azure IoT Hub
+///     client.
+/// </summary>
+static void ReportedStateCallback(int result, void* context)
+{
+    Log_Debug("INFO: Azure IoT Hub Device Twin reported state callback: status code %d.\n", result);
 }
