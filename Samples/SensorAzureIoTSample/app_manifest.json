@@ -8,7 +8,7 @@
     "AllowedConnections": [ "global.azure-devices-provisioning.net", "<- your DPS endpoint url ->", "<- your IoT Hub endpoint URL ->" ],
     "Gpio": [ 8, 9, 10, 15, 16, 17, 18, 19, 20, 12, 13, 0, 1, 4, 5, 57, 58, 11, 14, 48 ],
     "Uart": [ "ISU0", "ISU3" ],
-    "DeviceAuthentication": "<- your device autentication from your DPS service ->",
+    "DeviceAuthentication": "<- your tenant id ->",
     "AllowedApplicationConnections": []
   },
   "ApplicationType": "Default"
