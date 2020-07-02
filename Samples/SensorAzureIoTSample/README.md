@@ -23,7 +23,8 @@
 ※ Grove Starter Kit は必須ではありません。
 
 ## Azure Sphere、開発環境の準備  
-1. Azure Sphere デバイスと開発環境のセットアップ 
+1. Azure Sphere デバイスと開発環境のセットアップ  
+本サンプルを試す前に、[チュートリアル: 高レベルアプリケーションを構築する:Blink LED Sample](https://docs.microsoft.com/ja-jp/azure-sphere/install/qs-blink-application?tabs=windows&pivots=visual-studio)の実施をお勧めします。[開発環境、Azure Sphereの初期化](https://github.com/astraing-jp/astraining-jp/tree/master/handson/lab0) も参考になります。
 2. この[リポジトリ](https://github.com/ms-iotkithol-jp/MT3620_Grove_Shield)を、各自の開発PCに clone もしくは ZIP ファイルでダウンロード＆解凍し、Samples/SensorAzureIoTSample フォルダーに移動
 3. Azure Sphere ボードを開発PCに USB で接続
 4. Visual Studio 2019 で、Samples/SensorAzureIoTSample フォルダーを開く  
