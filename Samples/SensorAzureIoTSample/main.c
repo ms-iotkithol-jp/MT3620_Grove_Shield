@@ -11,10 +11,13 @@
 #include <applibs/gpio.h>
 #include <applibs/i2c.h>
 #include <applibs/networking.h>
+#include <applibs/eventloop.h>
 
 #include "../../MT3620_Grove_Shield_Library/Grove.h"
 #include "../../MT3620_Grove_Shield_Library/Sensors/GroveTempHumiBaroBME280.h"
 #include "../../MT3620_Grove_Shield_Library/Sensors/GroveTempHumiSHT31.h"
+#include "../../MT3620_Grove_Shield_Library/Sensors/GroveLEDButton.h"
+#include "../../MT3620_Grove_Shield_Library/Sensors/GroveRelay.h"
 
 // MT3620 RDB: LED 1 (red channel)
 #define SAMPLE_LED (8)  // MT3620_RDB_LED1_RED https://github.com/Azure/azure-sphere-samples/blob/master/Hardware/mt3620_rdb/inc/hw/sample_hardware.h
@@ -27,6 +30,8 @@
 #include <iothubtransportmqtt.h>
 #include <iothub.h>
 #include <azure_sphere_provisioning.h>
+
+#include "eventloop_timer_utilities.h"
 
 #include "parson.h" // used to parse Device Twin messages.
 
@@ -55,12 +60,31 @@ static IOTHUB_DEVICE_CLIENT_LL_HANDLE iothubClientHandle = NULL;
 static const int keepalivePeriodSeconds = 20;
 static bool iothubAuthenticated = false;
 
+
+static EventLoop* eventLoop = NULL;
+static EventLoopTimer* azureTimer = NULL;
+static void AzureTimerEventHandler(EventLoopTimer* timer);
+
+// Azure IoT poll periods
+static const int AzureIoTDefaultPollPeriodSeconds = 1;        // poll azure iot every second
+static const int AzureIoTPollPeriodsPerTelemetry = 5;         // only send telemetry 1/5 of polls
+static const int AzureIoTMinReconnectPeriodSeconds = 60;      // back off when reconnecting
+static const int AzureIoTMaxReconnectPeriodSeconds = 10 * 60; // back off limit
+static int azureIoTPollPeriodSeconds = -1;
+
+static bool WorkOnEventLoop();
+
 // State variables
 
 static GPIO_Value_Type sendMessageButtonState = GPIO_Value_High;
 static bool statusLedOn = false;
 // LED
 static int deviceTwinStatusLedGpioFd = -1;
+
+static int blueLEDButtonButtonPinId = 1;
+static int blueLEDButtonLEDPinId = 0;
+static void* blueLEDButton = NULL;
+static void* buzer = NULL;
 
 // Azure IoT poll periods
 /*
@@ -82,8 +106,6 @@ static int DeviceMethodCallback(const char* methodName, const unsigned char* pay
 static void TwinReportState(const char* jsonState);
 static void ReportedStateCallback(int result, void* context);
 
-
-
 static char timestamp[32];
 static char messageBuf[256];
 
@@ -102,6 +124,8 @@ typedef struct SensorValue
 typedef SensorValuePacket* (*ReadSensorValueDelegate)();
 static ReadSensorValueDelegate setupSensor();
 static char* serializeMessage(SensorValuePacket* packet);
+
+static int waitForSending = 1;
 
 /// <summary>
 ///     Main entry point for this sample.
@@ -143,9 +167,9 @@ int main(int argc, char *argv[])
     if (deviceTwinStatusLedGpioFd == -1) {
         Log_Debug("ERROR: Could not open SAMPLE_LED: %s (%d).\n", strerror(errno), errno);
     }
+    blueLEDButton = GroveLEDButton_Init(blueLEDButtonButtonPinId, blueLEDButtonLEDPinId);
 
-
-
+    int loopIndex = 0;
     // Main loop
     while (!terminationRequested) {
 
@@ -159,19 +183,20 @@ int main(int argc, char *argv[])
                 Log_Debug("Error: unable to create a new IoTHubMessage.\n");
             }
             else {
-                if (IoTHubDeviceClient_LL_SendEventAsync(iothubClientHandle, messageHandle, SendEventCallback, NULL) != IOTHUB_CLIENT_OK)
-                {
-                    Log_Debug("ERROR: failure requesting IoTHubClient to send telemetry event.\n");
-                }
-                else {
-                    Log_Debug("INFO: IoTHubClient accepted the telemetry event for delivery.\n");
+                if (((loopIndex++) % waitForSending) == 0) {
+                    if (IoTHubDeviceClient_LL_SendEventAsync(iothubClientHandle, messageHandle, SendEventCallback, NULL) != IOTHUB_CLIENT_OK)
+                    {
+                        Log_Debug("ERROR: failure requesting IoTHubClient to send telemetry event.\n");
+                    }
+                    else {
+                        Log_Debug("INFO: IoTHubClient accepted the telemetry event for delivery.\n");
+                    }
                 }
             }
-            IoTHubDeviceClient_LL_DoWork(iothubClientHandle);
-
         }
 
 		usleep(1000000);
+        WorkOnEventLoop();
     }
 
     Log_Debug("Application exiting\n");
@@ -234,6 +259,20 @@ static void SetupAzureClient(void)
     }
     IoTHubDeviceClient_LL_SetDeviceTwinCallback(iothubClientHandle, DeviceTwinCallback, NULL);
     IoTHubDeviceClient_LL_SetDeviceMethodCallback(iothubClientHandle, DeviceMethodCallback, NULL);
+
+    eventLoop = EventLoop_Create();
+    if (eventLoop == NULL) {
+        Log_Debug("ERROR: Could not create event loop.\n");
+    }
+    else {
+        azureIoTPollPeriodSeconds = AzureIoTDefaultPollPeriodSeconds;
+        struct timespec azureTelemetryPeriod = { .tv_sec = azureIoTPollPeriodSeconds, .tv_nsec = 0 };
+        azureTimer =
+            CreateEventLoopPeriodicTimer(eventLoop, &AzureTimerEventHandler, &azureTelemetryPeriod);
+        if (azureTimer == NULL) {
+            Log_Debug("ERROR: Failure creating azure timer!");
+        }
+    }
 }
 
 /// <summary>
@@ -411,6 +450,13 @@ static int DeviceMethodCallback(const char* methodName, const unsigned char* pay
         // Output alarm using Log_Debug
         Log_Debug("  ----- ALARM TRIGGERED! -----\n");
         responseString = "\"Alarm Triggered\""; // must be a JSON string (in quotes)
+        GroveLEDButton_LedOn(blueLEDButton);
+        result = 200;
+    }
+    else if (strcmp("StopAlarm", methodName) == 0) {
+        Log_Debug("  ----- ALARM STOP! -----\n");
+        responseString = "\"Alarm Stopped\""; // must be a JSON string (in quotes)
+        GroveLEDButton_LedOff(blueLEDButton);
         result = 200;
     }
     else {
@@ -467,7 +513,21 @@ static void DeviceTwinCallback(DEVICE_TWIN_UPDATE_STATE updateState, const unsig
             statusLedOn = statusLedValue == 1;
             GPIO_SetValue(deviceTwinStatusLedGpioFd,
                 statusLedOn ? GPIO_Value_Low : GPIO_Value_High);
+            if (blueLEDButton != NULL) {
+                if (statusLedOn) {
+                    GroveLEDButton_LedOn(blueLEDButton);
+                }
+                else {
+                    GroveLEDButton_LedOff(blueLEDButton);
+                }
+            }
         }
+    }
+
+    int reqWaitForSending = (int)json_object_dotget_number(desiredProperties, "TimingForSending");
+    if (reqWaitForSending > 0) {
+        waitForSending = reqWaitForSending;
+        Log_Debug("Updated waitForSending by %d\n", waitForSending);
     }
 
     // Report current status LED state
@@ -509,4 +569,29 @@ static void TwinReportState(const char* jsonState)
 static void ReportedStateCallback(int result, void* context)
 {
     Log_Debug("INFO: Azure IoT Hub Device Twin reported state callback: status code %d.\n", result);
+}
+
+/// <summary>
+/// Azure timer event:  Check connection status and send telemetry
+/// </summary>
+static void AzureTimerEventHandler(EventLoopTimer* timer)
+{
+    if (ConsumeEventLoopTimerEvent(timer) != 0) {
+        Log_Debug("ERROR: failure notify event consuming");
+        return;
+    }
+
+    if (iothubAuthenticated) {
+        Log_Debug("INFO: iot hub work doing...");
+        IoTHubDeviceClient_LL_DoWork(iothubClientHandle);
+    }
+}
+
+bool WorkOnEventLoop()
+{
+    EventLoop_Run_Result result = EventLoop_Run(eventLoop, -1, true);
+    if (result == EventLoop_Run_Failed) {
+        return false;
+    }
+    return true;
 }
