@@ -1,0 +1,39 @@
+﻿{
+  "SchemaVersion": 1,
+  "Name": "SensorLiefDeviceAzureIoTSample",
+  "ComponentId": "6287e73c-a28a-4497-a44a-84fa177a5cee",
+  "EntryPoint": "/bin/app",
+  "CmdArgs": [ "<- Your Azure DPS Scope Id ->" ],
+  "Capabilities": {
+    "AllowedConnections": [ "global.azure-devices-provisioning.net", "<- your DPS name ->.azure-devices-provisioning.net", "<- Your IoT Hub name ->.azure-devices.net" ],
+    "Gpio": [
+      "$MT3620_RDB_LED1_RED",
+      "$MT3620_RDB_LED1_GREEN",
+      "$MT3620_RDB_LED1_BLUE",
+      "$MT3620_RDB_LED2_RED",
+      "$MT3620_RDB_LED2_GREEN",
+      "$MT3620_RDB_LED2_BLUE",
+      "$MT3620_RDB_LED3_RED",
+      "$MT3620_RDB_LED3_GREEN",
+      "$MT3620_RDB_LED3_BLUE",
+      "$MT3620_RDB_LED4_RED",
+      "$MT3620_RDB_LED4_GREEN",
+      "$MT3620_RDB_LED4_BLUE",
+      "$MT3620_RDB_BUTTON_A",
+      "$MT3620_RDB_BUTTON_B",
+      "$MT3620_RDB_HEADER1_PIN4_GPIO",
+      "$MT3620_RDB_HEADER1_PIN6_GPIO",
+      "$MT3620_RDB_HEADER1_PIN12_GPIO",
+      "$MT3620_RDB_HEADER1_PIN5_GPIO",
+      "$MT3620_RDB_HEADER1_PIN9_GPIO",
+      "$MT3620_RDB_HEADER1_PIN7_GPIO",
+      "$MT3620_RDB_NETWORKING_LED_BLUE",
+      "$MT3620_RDB_NETWORKING_LED_GREEN",
+      "$MT3620_RDB_NETWORKING_LED_RED"
+    ],
+    "Uart": [ "$MT3620_RDB_HEADER2_ISU0_UART", "$MT3620_RDB_HEADER3_ISU3_UART" ],
+    "DeviceAuthentication": "<- your DPS authentication ->",
+    "AllowedApplicationConnections": []
+  },
+  "ApplicationType": "Default"
+}
